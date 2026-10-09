@@ -432,7 +432,7 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
 
     local flags = bit.bor(imgui.WindowFlags.AlwaysAutoResize, imgui.WindowFlags.NoCollapse, imgui.WindowFlags.NoResize)
 
-    if imgui.Begin(u8"Friend List##MainWindow", showMenu, flags) then
+    if imgui.Begin(u8"Evolve Friend List##MainWindow", showMenu, flags) then
         imgui.SetWindowFontScale(scale)
 
         local curPos = imgui.GetWindowPos()

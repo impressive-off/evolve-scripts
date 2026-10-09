@@ -432,7 +432,7 @@ imgui.OnFrame(function() return renderWindow[0] end, function()
     
     imgui.SetNextWindowSize(imgui.ImVec2(390, auto_login[0] and 460 or 410), imgui.Cond.Always)
     
-    if imgui.Begin("AutoLogin | " .. currentNick, renderWindow, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoScrollbar) then
+    if imgui.Begin("Evolve AutoLogin | " .. currentNick, renderWindow, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoScrollbar) then
         
         imgui.Text(u8"Пароль")
         local p_flag = not show_pass[0] and imgui.InputTextFlags.Password or 0
