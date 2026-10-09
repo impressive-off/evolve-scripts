@@ -29,9 +29,11 @@ local alignList = {
 }
 
 local eCrimePath = getWorkingDirectory() .. "\\E-CRIME\\"
-if not doesDirectoryExist(eCrimePath) then createDirectory(eCrimePath) end
+if not doesDirectoryExist(eCrimePath) then
+    createDirectory(eCrimePath)
+end
 
-local configFile = eCrimePath .. "Evolve-FriendList.ini"
+local configFile = "Evolve-FriendList.ini"
 local localFriendsFile = eCrimePath .. "friends.txt"
 local cfg = inicfg.load(nil, configFile)
 
@@ -72,7 +74,7 @@ if not cfg then
             hudEnabled = 1,
             friendListURL = DEFAULT_URL,
             friendSource = 0,
-            hudTitleText = "Friends:",
+            hudTitleText = "Friends",
             no_friend_damage = 0,
             inf_ammo_when_friendfire = 0,
             color_by_clist = 1,
@@ -422,12 +424,12 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
     local scale = math.max(0.75, sy / 1080)
 
     local winWidth = 620 * scale
-    imgui.SetNextWindowSize(imgui.ImVec2(winWidth, 0), imgui.Cond_Always)
+    imgui.SetNextWindowSize(imgui.ImVec2(winWidth, 0), imgui.Cond.Always)
 
     if not menuX or not menuY then
         menuX = sx / 2 - winWidth / 2
         menuY = sy / 2 - 280 * scale
-        imgui.SetNextWindowPos(imgui.ImVec2(menuX, menuY), imgui.Cond_Always)
+        imgui.SetNextWindowPos(imgui.ImVec2(menuX, menuY), imgui.Cond.Always)
     end
 
     local flags = bit.bor(imgui.WindowFlags.AlwaysAutoResize, imgui.WindowFlags.NoCollapse, imgui.WindowFlags.NoResize)
@@ -527,7 +529,6 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
                         end
                         imgui.EndCombo()
                     end
-                    imgui.PopItemWidth()
                     imgui.SameLine()
                     if imgui.BeginCombo(u8"##TitleFontAlign", alignList[(cfg.options.fontAlign or 0) + 1]) then
                         for i, name in ipairs(alignList) do
@@ -685,7 +686,7 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
                             imgui.OpenPopup(u8"Добавить по ID")
                         end
 
-                        imgui.SetNextWindowSize(imgui.ImVec2(320 * scale, 0), imgui.Cond_Always)
+                        imgui.SetNextWindowSize(imgui.ImVec2(320 * scale, 0), imgui.Cond.Always)
                         if imgui.BeginPopupModal(u8"Добавить по нику", nil, imgui.WindowFlags.NoResize) then
                             imgui.Text(u8"Введите Nick_Name:")
                             
@@ -708,7 +709,7 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
                             imgui.EndPopup()
                         end
 
-                        imgui.SetNextWindowSize(imgui.ImVec2(320 * scale, 0), imgui.Cond_Always)
+                        imgui.SetNextWindowSize(imgui.ImVec2(320 * scale, 0), imgui.Cond.Always)
                         if imgui.BeginPopupModal(u8"Добавить по ID", nil, imgui.WindowFlags.NoResize) then
                             imgui.Text(u8"Введите ID игрока:")
                             
@@ -786,18 +787,22 @@ function main()
             hudX = math.max(0, math.min(sx - 100, mx))
             hudY = math.max(0, math.min(sy - 30, my))
 
-            if wasKeyReleased(vkeys.VK_RBUTTON) then
+            if not isKeyDown(vkeys.VK_RBUTTON) then
                 clickReleased = true
             end
 
             if clickReleased and isKeyJustPressed(vkeys.VK_RBUTTON) then
                 cfg.options.hudX = hudX
                 cfg.options.hudY = hudY
-                inicfg.save(cfg, configFile)
+                local saved = inicfg.save(cfg, configFile)
                 isMovingHud = false
                 clickReleased = false
                 showCursor(false)
-                sampAddChatMessage("Позиция HUD cохранена!", -1)
+                if saved then
+                    sampAddChatMessage("Позиция HUD сохранена!", -1)
+                else
+                    sampAddChatMessage("{FF0000}Не удалось сохранить позицию HUD в " .. configFile, -1)
+                end
             end
         end
 
@@ -868,7 +873,7 @@ function drawHUD()
 end
 
 local function stripColors(str)
-    return str:gsub("~%a~", "")
+    return (str:gsub("~%a~", ""))
 end
 
 local function isFriend1(nick)
