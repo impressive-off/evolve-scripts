@@ -675,10 +675,26 @@ local function drawMarker(row)
     drawCircle(cx, cy, r, 0xFFE62020)
 end
 
+local scaledCache, scaledSy
+local function scaledMenu()
+    local _, sy = getScreenResolution()
+    if scaledCache and scaledSy == sy then return scaledCache end
+    local sc = math.max(0.75, sy / 1080)
+    local m = cfg.menu
+    scaledSy = sy
+    scaledCache = setmetatable({
+        padX = floor(m.padX * sc + 0.5),
+        padY = floor(m.padY * sc + 0.5),
+        gap = max(1, floor(m.gap * sc + 0.5)),
+        outerPadding = floor(m.outerPadding * sc + 0.5),
+    }, { __index = m })
+    return scaledCache
+end
+
 local menu = { open = false }
 
 local function layoutMenu()
-    local m = cfg.menu
+	local m = scaledMenu()
     local ih = renderGetFontDrawHeight(font) + m.padY * 2
     local w = 0
     local idW = 0
@@ -760,7 +776,7 @@ local function closeMenu() menu.open = false end
 local function menuItemAt(mx, my)
     if not menu.open then return nil end
     if mx < menu.x or mx > menu.x + menu.fw then return nil end
-    local step = menu.ih + cfg.menu.gap
+    local step = menu.ih + scaledMenu().gap
     local rel = my - menu.y
     if rel < 0 then return nil end
     local i = floor(rel / step) + 1
@@ -769,7 +785,7 @@ local function menuItemAt(mx, my)
         return i, 'main'
     end
     local it = menu.items[i]
-    if it.idLabel and menu.idw > 0 and mx >= menu.x + menu.w + cfg.menu.gap then
+    if it.idLabel and menu.idw > 0 and mx >= menu.x + menu.w + scaledMenu().gap then
         return i, 'id'
     end
     return nil
@@ -777,7 +793,7 @@ end
 
 local function drawMenu(mx, my)
     layoutMenu()
-    local m = cfg.menu
+    local m = scaledMenu()
     local pad = m.outerPadding
     roundedBox(menu.x - pad, menu.y - pad, menu.w + pad * 2, menu.h + pad * 2, m.bgColor)
 
@@ -1003,7 +1019,9 @@ function main()
     while not isSampAvailable() do wait(100) end
 
     infoFont = renderCreateFont("Segoe UI", 11, 13)
-    font = renderCreateFont(cfg.menu.fontName, cfg.menu.fontSize, font_flag.BOLD + font_flag.BORDER + font_flag.SHADOW)
+    local _, scrH = getScreenResolution()
+    local fsc = math.max(0.75, scrH / 1080)
+    font = renderCreateFont(cfg.menu.fontName, floor(cfg.menu.fontSize * fsc + 0.5), font_flag.BOLD + font_flag.BORDER + font_flag.SHADOW)
 
     local initFs = regDword('fontsize') or 0
     S.regFsSeen = initFs
@@ -1367,10 +1385,14 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
     style.Colors[imgui.Col.FrameBg] = imgui.ImVec4(0.20, 0.20, 0.20, 1.00)
     style.Colors[imgui.Col.CheckMark] = imgui.ImVec4(0.90, 0.90, 0.90, 1.00)
 
-    imgui.SetNextWindowPos(imgui.ImVec2(getScreenResolution() / 2, select(2, getScreenResolution()) / 2), imgui.Cond.Always, imgui.ImVec2(0.5, 0.5))
-    imgui.SetNextWindowSize(imgui.ImVec2(380, 610), imgui.Cond.Always)
+    local sx, sy = getScreenResolution()
+    local scale = math.max(0.75, sy / 1080)
 
-    if imgui.Begin(u8"Настройки EvolveChatHelper", showMenu, imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse) then
+    imgui.SetNextWindowPos(imgui.ImVec2(sx / 2 - 190 * scale, sy / 2 - 300 * scale), imgui.Cond.FirstUseEver)
+
+    local flags = imgui.WindowFlags.NoResize + imgui.WindowFlags.NoCollapse + imgui.WindowFlags.AlwaysAutoResize
+    if imgui.Begin(u8"Настройки EvolveChatHelper", showMenu, flags) then
+        imgui.SetWindowFontScale(scale)
         imgui.Spacing()
         if imgui.Checkbox(u8"Инфо-панель чата", imgui.new.bool(mainIni.settings.chatPanelEnabled)) then
             mainIni.settings.chatPanelEnabled = not mainIni.settings.chatPanelEnabled
@@ -1457,7 +1479,6 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
             inicfg.save(mainIni, directIni)
         end
 
-        imgui.Spacing()
         if imgui.Checkbox(u8"Скрыть SMS от Контрабандиста", imgui.new.bool(mainIni.settings.smskontr)) then
             mainIni.settings.smskontr = not mainIni.settings.smskontr
             inicfg.save(mainIni, directIni)
@@ -1466,6 +1487,6 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
             mainIni.settings.uvedkontr = not mainIni.settings.uvedkontr
             inicfg.save(mainIni, directIni)
         end
-        imgui.End()
     end
+    imgui.End()
 end)
