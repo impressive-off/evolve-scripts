@@ -56,7 +56,7 @@ local pendingClose = false
 local isMovingHud = false
 local clickReleased = false
 
-local hudX, hudY = 6, 290
+local hudX, hudY = 6, 270
 local menuX, menuY = nil, nil
 
 if not cfg then
@@ -70,7 +70,7 @@ if not cfg then
             hudFriendColorB = 1.0
         },
         options = {
-            scriptEnabled = 1,
+            scriptEnabled = 0,
             hudEnabled = 1,
             friendListURL = DEFAULT_URL,
             friendSource = 0,
@@ -82,8 +82,9 @@ if not cfg then
             showPlayerId = 1,
             showTitle = 1,
             showCount = 1,
+            onlyTab = 0,
             hudX = 6,
-            hudY = 290,
+            hudY = 270,
             menuX = -1,
             menuY = -1,
             titleFontIndex = 4,
@@ -100,7 +101,7 @@ else
     cfg.options = cfg.options or {}
     cfg.colors = cfg.colors or {}
 
-    if cfg.options.scriptEnabled == nil then cfg.options.scriptEnabled = 1 end
+    if cfg.options.scriptEnabled == nil then cfg.options.scriptEnabled = 0 end
     if cfg.options.hudEnabled == nil then cfg.options.hudEnabled = 1 end
     if cfg.options.friendSource == nil then cfg.options.friendSource = 0 end
     if cfg.options.no_friend_damage == nil then cfg.options.no_friend_damage = 0 end
@@ -110,6 +111,7 @@ else
     if cfg.options.showPlayerId == nil then cfg.options.showPlayerId = 1 end
     if cfg.options.showTitle == nil then cfg.options.showTitle = 1 end
     if cfg.options.showCount == nil then cfg.options.showCount = 1 end
+    if cfg.options.onlyTab == nil then cfg.options.onlyTab = 0 end	
     if cfg.options.hudTitleText == nil then cfg.options.hudTitleText = "Friends:" end
     if not cfg.options.friendListURL or #cfg.options.friendListURL:match("^%s*(.-)%s*$") == 0 then
         cfg.options.friendListURL = DEFAULT_URL
@@ -135,7 +137,7 @@ else
     
     PASTEBIN_URL = cfg.options.friendListURL
     hudX = cfg.options.hudX or 6
-    hudY = cfg.options.hudY or 290
+    hudY = cfg.options.hudY or 270
     if cfg.options.menuX and cfg.options.menuY and cfg.options.menuX > 0 and cfg.options.menuY > 0 then
         menuX = cfg.options.menuX
         menuY = cfg.options.menuY
@@ -152,6 +154,7 @@ local ShowStreamZone = imgui.new.bool(cfg.options.showStreamZone == 1)
 local ShowPlayerId = imgui.new.bool(cfg.options.showPlayerId == 1)
 local ShowTitle = imgui.new.bool(cfg.options.showTitle == 1)
 local ShowCount = imgui.new.bool(cfg.options.showCount == 1)
+local OnlyTab = imgui.new.bool(cfg.options.onlyTab == 1)
 local hudTitleBuf = imgui.new.char[256](u8(cfg.options.hudTitleText or "Friends:"))
 local urlBuf = imgui.new.char[256](u8(cfg.options.friendListURL or DEFAULT_URL))
 
@@ -224,6 +227,11 @@ function onWindowMessage(msg, wparam, lparam)
         consumeWindowMessage(true, true)
         return
     end
+end
+
+local function isTabOpen()
+    local ok, res = pcall(sampIsScoreboardOpen)
+    return ok and res == true
 end
 
 local function isFriend(nick)
@@ -460,6 +468,13 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
             end
             imgui.SameLine()
             imgui.Text(u8"HUD на экране")
+			
+            if HudEnabled[0] then
+                if imgui.Checkbox(u8"Только при открытом TAB", OnlyTab) then
+                    cfg.options.onlyTab = OnlyTab[0] and 1 or 0
+                    inicfg.save(cfg, configFile)
+                end
+            end		
 
             imgui.Separator()
 
@@ -812,6 +827,8 @@ end
 
 function drawHUD()
     if cfg.options.scriptEnabled ~= 1 or cfg.options.hudEnabled ~= 1 or isPauseMenuActive() then return end
+	
+	if cfg.options.onlyTab == 1 and not isMovingHud and not isTabOpen() then return end
 
     if not fontTitle or not fontListRender then
         updateFont()
