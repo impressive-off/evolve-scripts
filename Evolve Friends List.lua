@@ -55,6 +55,8 @@ local showMenu = imgui.new.bool(false)
 local pendingClose = false
 local isMovingHud = false
 local clickReleased = false
+local renderHidden = false
+local bindingKey = false
 
 local hudX, hudY = 6, 270
 local menuX, menuY = nil, nil
@@ -93,7 +95,11 @@ if not cfg then
             listFontIndex = 4,
             listFontSize = 10,
             listFontFlags = 13,
-            fontAlign = 0
+            fontAlign = 0,
+            notifyConnect = 1,
+            hideKey = 118,
+            hideKeyEnabled = 0,
+            showSelf = 0
         }
     }
     inicfg.save(cfg, configFile)
@@ -126,6 +132,10 @@ else
     if cfg.options.listFontFlags == nil then cfg.options.listFontFlags = 13 end
     
     if cfg.options.fontAlign == nil then cfg.options.fontAlign = 0 end
+    if cfg.options.notifyConnect == nil then cfg.options.notifyConnect = 1 end
+    if cfg.options.hideKey == nil then cfg.options.hideKey = 118 end 
+    if cfg.options.hideKeyEnabled == nil then cfg.options.hideKeyEnabled = 0 end
+    if cfg.options.showSelf == nil then cfg.options.showSelf = 0 end
     
     if cfg.colors.hudTitleColorR == nil then cfg.colors.hudTitleColorR = 1.0 end
     if cfg.colors.hudTitleColorG == nil then cfg.colors.hudTitleColorG = 83 / 255 end
@@ -155,6 +165,9 @@ local ShowPlayerId = imgui.new.bool(cfg.options.showPlayerId == 1)
 local ShowTitle = imgui.new.bool(cfg.options.showTitle == 1)
 local ShowCount = imgui.new.bool(cfg.options.showCount == 1)
 local OnlyTab = imgui.new.bool(cfg.options.onlyTab == 1)
+local NotifyConnect = imgui.new.bool(cfg.options.notifyConnect == 1)
+local HideKeyEnabled = imgui.new.bool(cfg.options.hideKeyEnabled == 1)
+local ShowSelf = imgui.new.bool(cfg.options.showSelf == 1)
 local hudTitleBuf = imgui.new.char[256](u8(cfg.options.hudTitleText or "Friends:"))
 local urlBuf = imgui.new.char[256](u8(cfg.options.friendListURL or DEFAULT_URL))
 
@@ -195,6 +208,31 @@ local function getPlayerColorHex(nick)
         end
     end
     return "{FFFFFF}"
+end
+
+local function getPlayerIdByNick(nick)
+    for id = 0, 1000 do
+        if sampIsPlayerConnected(id) and sampGetPlayerNickname(id) == nick then
+            return id
+        end
+    end
+    return nil
+end
+
+local function nickWithId(nick, id)
+    local colorHex = getPlayerColorHex(nick)
+    id = id or getPlayerIdByNick(nick)
+    if id then
+        return string.format("%s%s[%d]", colorHex, nick, id)
+    end
+    return colorHex .. nick
+end
+
+local function getKeyName(key)
+    if not key or key == 0 then return u8"Íåò" end
+    local ok, name = pcall(vkeys.id_to_name, key)
+    if ok and name then return name end
+    return tostring(key)
 end
 
 HUD_TITLE_COLOR = imguiFloat3ToARGB(imguiTitleColor)
@@ -299,18 +337,17 @@ local function addFriend(nick)
     if not isFriend(nick) then
         table.insert(friends, nick)
         saveLocalFriends()
-        local colorHex = getPlayerColorHex(nick)
-        sampAddChatMessage(string.format("Èãğîê %s%s{FFFFFF} äîáàâëåí â ñïèñîê äğóçåé", colorHex, nick), -1)
+        sampAddChatMessage(string.format("Èãğîê %s{FFFFFF} äîáàâëåí â ñïèñîê äğóçåé", nickWithId(nick)), -1)
     end
 end
 
 local function removeFriend(index)
     local nick = friends[index]
     if nick then
-        local colorHex = getPlayerColorHex(nick)
+        local shownNick = nickWithId(nick)
         table.remove(friends, index)
         saveLocalFriends()
-        sampAddChatMessage(string.format("Èãğîê %s%s{FFFFFF} óäàëåí èç ñïèñêà äğóçåé", colorHex, nick), -1)
+        sampAddChatMessage(string.format("Èãğîê %s{FFFFFF} óäàëåí èç ñïèñêà äğóçåé", shownNick), -1)
     end
 end
 
@@ -470,11 +507,58 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
             imgui.Text(u8"HUD íà ıêğàíå")
 			
             if HudEnabled[0] then
+                if imgui.Checkbox(u8"Ñêğûâàòü ğåíäåğ ïî êëàâèøå", HideKeyEnabled) then
+                    cfg.options.hideKeyEnabled = HideKeyEnabled[0] and 1 or 0
+                    bindingKey = false
+                    inicfg.save(cfg, configFile)
+                end
+
+                if HideKeyEnabled[0] then
+                    imgui.AlignTextToFramePadding()
+                    imgui.Text(u8"Êëàâèøà:")
+                    imgui.SameLine()
+                    local keyLabel = bindingKey and u8"Íàæìèòå êëàâèøó..." or getKeyName(cfg.options.hideKey)
+                    if imgui.Button(keyLabel .. "##hidekeybtn", imgui.ImVec2(150 * scale, 22 * scale)) then
+                        bindingKey = true
+                    end
+                    if bindingKey then
+                        imgui.SameLine()
+                        imgui.AlignTextToFramePadding()
+                        imgui.Text(u8"Backspace - ñáğîñèòü")
+                    elseif not cfg.options.hideKey or cfg.options.hideKey == 0 then
+                        imgui.SameLine()
+                        imgui.AlignTextToFramePadding()
+                        imgui.TextDisabled(u8"Ïî óìîë÷àíèş F7")
+                    end
+                end
+
                 if imgui.Checkbox(u8"Òîëüêî ïğè îòêğûòîì TAB", OnlyTab) then
                     cfg.options.onlyTab = OnlyTab[0] and 1 or 0
                     inicfg.save(cfg, configFile)
                 end
             end		
+
+            if imgui.Checkbox(u8"Óâåäîìëåíèå î ïîäêëş÷åíèè / îòêëş÷åíèè äğóçåé", NotifyConnect) then
+                cfg.options.notifyConnect = NotifyConnect[0] and 1 or 0
+                inicfg.save(cfg, configFile)
+            end
+
+            if imgui.Checkbox(u8"Îòîáğàæàòü ñåáÿ â ñïèñêå äğóçåé", ShowSelf) then
+                cfg.options.showSelf = ShowSelf[0] and 1 or 0
+                inicfg.save(cfg, configFile)
+            end
+
+            if imgui.Checkbox(u8"Îòêëş÷èòü óğîí ïî äğóçüÿì (No Damage)", NoFriendDamage) then
+                cfg.options.no_friend_damage = NoFriendDamage[0] and 1 or 0
+                inicfg.save(cfg, configFile)
+            end
+
+            if NoFriendDamage[0] then
+                if imgui.Checkbox(u8"Áåñêîíå÷íûå ïàòğîíû ïğè ñòğåëüáå ïî äğóçüÿì", InfAmmoWhenFrDmg) then
+                    cfg.options.inf_ammo_when_friendfire = InfAmmoWhenFrDmg[0] and 1 or 0
+                    inicfg.save(cfg, configFile)
+                end
+            end
 
             imgui.Separator()
 
@@ -663,21 +747,6 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
                     end
 
                     imgui.Separator()
-                    imgui.TextColored(imgui.ImVec4(0.0, 0.85, 1.0, 1.0), u8"Äîïîëíèòåëüíûå ôóíêöèè")
-
-                    if imgui.Checkbox(u8"Îòêëş÷èòü óğîí ïî äğóçüÿì (No Damage)", NoFriendDamage) then
-                        cfg.options.no_friend_damage = NoFriendDamage[0] and 1 or 0
-                        inicfg.save(cfg, configFile)
-                    end
-
-                    if NoFriendDamage[0] then
-                        if imgui.Checkbox(u8"Áåñêîíå÷íûå ïàòğîíû ïğè ñòğåëüáå ïî äğóçüÿì", InfAmmoWhenFrDmg) then
-                            cfg.options.inf_ammo_when_friendfire = InfAmmoWhenFrDmg[0] and 1 or 0
-                            inicfg.save(cfg, configFile)
-                        end
-                    end
-
-                    imgui.Separator()
 
                     if imgui.Button(u8"Èçìåíèòü ïîçèöèş HUD", imgui.ImVec2(-1, 26 * scale)) then
                         showMenu[0] = false
@@ -779,8 +848,43 @@ imgui.OnFrame(function() return showMenu[0] end, function(player)
     imgui.End()
 end)
 
+local function cmdFriend(arg)
+    arg = (arg or ""):match("^%s*(.-)%s*$")
+    if #arg == 0 then
+        sampAddChatMessage("Èñïîëüçîâàíèå: /friend [Nick_Name | ID]", -1)
+        return
+    end
+
+    if cfg.options.friendSource == 1 then
+        sampAddChatMessage("{FF0000}Âêëş÷¸í ğåæèì Pastebin, ğåäàêòèğîâàíèå ñïèñêà îòêëş÷åíî.", -1)
+        return
+    end
+
+    local nick = arg
+    local id = tonumber(arg)
+    if id then
+        if id >= 0 and id <= 999 and sampIsPlayerConnected(id) then
+            nick = sampGetPlayerNickname(id)
+        else
+            sampAddChatMessage("{FF0000}Èãğîê ñ òàêèì ID íå íàéäåí!", -1)
+            return
+        end
+    end
+
+    for i, f in ipairs(friends) do
+        if f == nick then
+            removeFriend(i) 
+            return
+        end
+    end
+
+    addFriend(nick) 
+end
+
 function main()
     while not isSampAvailable() do wait(100) end
+
+    sampRegisterChatCommand("friend", cmdFriend)
 
     updateFont()
     loadFriends()
@@ -793,6 +897,34 @@ function main()
         if pendingClose then
             showMenu[0] = false
             pendingClose = false
+            bindingKey = false
+        end
+
+        if cfg.options.hideKeyEnabled ~= 1 then
+            bindingKey = false
+            renderHidden = false
+        end
+
+        if bindingKey then
+            for k = 8, 254 do
+                if isKeyJustPressed(k) then
+                    if k == vkeys.VK_ESCAPE then
+                        bindingKey = false
+                    else
+                        if k == vkeys.VK_BACK then
+                            cfg.options.hideKey = 0
+                        else
+                            cfg.options.hideKey = k
+                        end
+                        inicfg.save(cfg, configFile)
+                        bindingKey = false
+                    end
+                    break
+                end
+            end
+        elseif cfg.options.hideKeyEnabled == 1 and cfg.options.hideKey and cfg.options.hideKey ~= 0 and isKeyJustPressed(cfg.options.hideKey)
+            and not sampIsChatInputActive() and not sampIsDialogActive() then
+            renderHidden = not renderHidden
         end
 
         if isMovingHud then
@@ -826,6 +958,7 @@ function main()
 end
 
 function drawHUD()
+    if renderHidden and not isMovingHud then return end
     if cfg.options.scriptEnabled ~= 1 or cfg.options.hudEnabled ~= 1 or isPauseMenuActive() then return end
 	
 	if cfg.options.onlyTab == 1 and not isMovingHud and not isTabOpen() then return end
@@ -835,13 +968,30 @@ function drawHUD()
         if not fontTitle or not fontListRender then return end
     end
 
+    local list = {}
+    if cfg.options.showSelf == 1 then
+        local okSelf, selfId = sampGetPlayerIdByCharHandle(PLAYER_PED)
+        if okSelf then
+            local alreadyIn = false
+            for _, p in ipairs(onlineFriends) do
+                if p.id == selfId then alreadyIn = true break end
+            end
+            if not alreadyIn then
+                table.insert(list, {id = selfId, nick = sampGetPlayerNickname(selfId)})
+            end
+        end
+    end
+    for _, p in ipairs(onlineFriends) do
+        table.insert(list, p)
+    end
+
     local x, y = hudX, hudY
     local align = cfg.options.fontAlign or 0
 
     if cfg.options.showTitle == 1 then
         local titleText = cfg.options.hudTitleText or "Friends:"
         if cfg.options.showCount == 1 then
-            titleText = string.format("%s[%d]", titleText, #onlineFriends)
+            titleText = string.format("%s[%d]", titleText, #list)
         end
 
         local titleLen = renderGetFontDrawTextLength(fontTitle, titleText) or 0
@@ -856,7 +1006,7 @@ function drawHUD()
         y = y + (cfg.options.titleFontSize or 11) + 8
     end
 
-    for _, player in ipairs(onlineFriends) do
+    for _, player in ipairs(list) do
         local inStream, ped = sampGetCharHandleBySampPlayerId(player.id)
         local inStreamZone = (inStream and doesCharExist(ped))
         local name = player.nick or "?"
@@ -938,12 +1088,25 @@ function sampEvents.onPlayerJoin(id, color, isNpc, nickname)
     updateOnline()
     if isFriend(nickname) then
         table.insert(onlineFriends, {id = id, nick = nickname})
+
+        if cfg.options.scriptEnabled == 1 and cfg.options.notifyConnect == 1 then
+            lua_thread.create(function()
+                wait(300) 
+                sampAddChatMessage(string.format("Èãğîê %s{FFFFFF} ïîäêëş÷èëñÿ ê ñåğâåğó", nickWithId(nickname, id)), -1)
+            end)
+        end
     end
 end
 
 function sampEvents.onPlayerQuit(id)
     for i = #onlineFriends, 1, -1 do
         if onlineFriends[i].id == id then
+            local nick = onlineFriends[i].nick
+
+            if cfg.options.scriptEnabled == 1 and cfg.options.notifyConnect == 1 then
+                sampAddChatMessage(string.format("Èãğîê %s{FFFFFF} îòêëş÷èëñÿ îò ñåğâåğà", nickWithId(nick, id)), -1)
+            end
+
             table.remove(onlineFriends, i)
         end
     end
