@@ -10,6 +10,7 @@ local sampev = require 'samp.events'
 local bit = require 'bit'
 
 local menu_window_state = imgui.ImBool(false)
+local hide_chat_lines = imgui.ImBool(true)
 local sw, sh = getScreenResolution()
 local scale = math.min(sw / 1920, sh / 1080)
 if scale < 0.5 then scale = 0.5 end
@@ -147,6 +148,9 @@ local function getPlayerClistHex(id)
     return string.format("%02X%02X%02X", r, g, b)
 end
 
+local MIN_NICK_BRIGHTNESS = 0.35
+local NICK_LIGHTEN_AMOUNT = 0.25
+
 local function getPlayerClistImVec4(id)
     if not id then return nil end
     local pid = tonumber(id)
@@ -167,6 +171,13 @@ local function getPlayerClistImVec4(id)
     local r = bit.band(bit.rshift(color, 16), 0xFF) / 255.0
     local g = bit.band(bit.rshift(color, 8), 0xFF) / 255.0
     local b = bit.band(color, 0xFF) / 255.0
+
+    local brightness = 0.299 * r + 0.587 * g + 0.114 * b
+    if brightness < MIN_NICK_BRIGHTNESS then
+        r = r + (1.0 - r) * NICK_LIGHTEN_AMOUNT
+        g = g + (1.0 - g) * NICK_LIGHTEN_AMOUNT
+        b = b + (1.0 - b) * NICK_LIGHTEN_AMOUNT
+    end
 
     return imgui.ImVec4(r, g, b, 1.0)
 end
@@ -272,6 +283,22 @@ local function rebuildFilteredList()
     end)
 end
 
+local function filterButton(label, ftype, w, h)
+    local active = (filter_type == ftype)
+    if active then
+        imgui.PushStyleColor(imgui.Col.Button, imgui.ImVec4(0.20, 0.45, 0.85, 1.00))
+        imgui.PushStyleColor(imgui.Col.ButtonHovered, imgui.ImVec4(0.26, 0.52, 0.92, 1.00))
+        imgui.PushStyleColor(imgui.Col.ButtonActive, imgui.ImVec4(0.16, 0.38, 0.75, 1.00))
+    end
+    if imgui.Button(label, imgui.ImVec2(w, h)) then
+        filter_type = ftype
+        need_rebuild_filter = true
+    end
+    if active then
+        imgui.PopStyleColor(3)
+    end
+end
+
 function sampev.onShowDialog(dialogId, style, title, button1, button2, text)
     local cleanTitle = title:gsub("{%x+}", "")
     if cleanTitle:find("Состав семьи") or cleanTitle:find("В сети:") then
@@ -349,12 +376,16 @@ function sampev.onServerMessage(color, text)
     local off_check_nick = clean:match("Производится проверка находится ли%s+([%w_]+)%s+в вашей семье")
     if off_check_nick then
         last_off_target_nick = off_check_nick
+        if hide_chat_lines.v and is_menu_action then
+            return false
+        end
         return
     end
 
     local off_set_rank = clean:match("Указанный игрок повышен/понижен до ранга%s+(%d+)")
     if off_set_rank and last_off_target_nick then
         local new_r = tonumber(off_set_rank)
+        local was_menu_action = is_menu_action
         for i, m in ipairs(membersList) do
             if m.nick == last_off_target_nick then
                 local old_r = m.rank or 1
@@ -375,6 +406,9 @@ function sampev.onServerMessage(color, text)
         end
         is_menu_action = false
         last_off_target_nick = nil
+        if hide_chat_lines.v and was_menu_action then
+            return false
+        end
         return
     end
 
@@ -388,17 +422,24 @@ function sampev.onServerMessage(color, text)
             online = false,
             last_seen = last_seen
         })
+        if hide_chat_lines.v then
+            return false
+        end
         return
     end
 
     local uninvited_nick = clean:match("Игрок%s+([%w_]+)%s+уволен из семьи") or clean:match("Вы выгнали%s+([%w_]+)%s+из семьи")
     if uninvited_nick then
+        local was_menu_action = is_menu_action
         if is_menu_action then
             local p_str = getFormattedPlayerStr(uninvited_nick, nil)
             sampAddChatMessage(string.format("[FMB Menu] {FFFFFF}Игрок %s был уволен из семьи", p_str), 0x808080)
             is_menu_action = false
         end
         removeMember(uninvited_nick)
+        if hide_chat_lines.v and was_menu_action then
+            return false
+        end
         return
     end
 
@@ -408,6 +449,7 @@ function sampev.onServerMessage(color, text)
     end
     if set_nick and set_rank then
         local new_r = tonumber(set_rank)
+        local was_menu_action = is_menu_action
         for i, m in ipairs(membersList) do
             if m.nick == set_nick then
                 local old_r = m.rank or 1
@@ -427,6 +469,9 @@ function sampev.onServerMessage(color, text)
             end
         end
         is_menu_action = false
+        if hide_chat_lines.v and was_menu_action then
+            return false
+        end
         return
     end
 end
@@ -483,21 +528,15 @@ function imgui.OnDrawFrame()
 
         if #membersList > 0 then
             imgui.SameLine()
-            if imgui.Button(u8"Все", imgui.ImVec2(S(60), S(24))) then 
-                filter_type = 1 
-                need_rebuild_filter = true
-            end
+            filterButton(u8"Все", 1, S(60), S(24))
             imgui.SameLine()
-            if imgui.Button(u8"Онлайн", imgui.ImVec2(S(70), S(24))) then 
-                filter_type = 2 
-                need_rebuild_filter = true
-            end
+            filterButton(u8"Онлайн", 2, S(70), S(24))
             imgui.SameLine()
-            if imgui.Button(u8"Офлайн", imgui.ImVec2(S(70), S(24))) then 
-                filter_type = 3 
-                need_rebuild_filter = true
-            end
+            filterButton(u8"Офлайн", 3, S(70), S(24))
         end
+
+        imgui.SameLine()
+        imgui.Checkbox(u8"Не отображать строки в чате", hide_chat_lines)
 
         imgui.Spacing()
         imgui.Separator()
