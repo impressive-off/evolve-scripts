@@ -9,6 +9,7 @@ u8 = encoding.UTF8
 local sampev = require 'samp.events'
 local bit = require 'bit'
 
+local hide_chat_lines = imgui.ImBool(true)
 local menu_window_state = imgui.ImBool(false)
 local sw, sh = getScreenResolution()
 
@@ -35,6 +36,9 @@ local function getMyId()
     return nil
 end
 
+local MIN_NICK_BRIGHTNESS = 0.35
+local NICK_LIGHTEN_AMOUNT = 0.25
+
 local function getPlayerClistImVec4(id)
     if not id then return nil end
     local pid = tonumber(id)
@@ -55,6 +59,13 @@ local function getPlayerClistImVec4(id)
     local r = bit.band(bit.rshift(color, 16), 0xFF) / 255.0
     local g = bit.band(bit.rshift(color, 8), 0xFF) / 255.0
     local b = bit.band(color, 0xFF) / 255.0
+
+    local brightness = 0.299 * r + 0.587 * g + 0.114 * b
+    if brightness < MIN_NICK_BRIGHTNESS then
+        r = r + (1.0 - r) * NICK_LIGHTEN_AMOUNT
+        g = g + (1.0 - g) * NICK_LIGHTEN_AMOUNT
+        b = b + (1.0 - b) * NICK_LIGHTEN_AMOUNT
+    end
 
     return imgui.ImVec4(r, g, b, 1.0)
 end
@@ -725,6 +736,7 @@ function sampev.onServerMessage(color, text)
                     online = true,
                     id = pId
                 })
+                if hide_chat_lines.v then return false end
             end
         end
     elseif syncing_offline then
@@ -749,6 +761,7 @@ function sampev.onServerMessage(color, text)
                     id = nil,
                     last_seen = lastSeen or "—"
                 })
+                if hide_chat_lines.v then return false end 
             end
         end
     end
@@ -757,6 +770,9 @@ function sampev.onServerMessage(color, text)
     if totalStr then
         total_members_count = tonumber(totalStr)
         list_synced = true
+        if hide_chat_lines.v and (syncing_online or syncing_offline) then
+            return false
+        end
     end
 end
 
@@ -1073,8 +1089,8 @@ function imgui.OnDrawFrame()
         if imgui.Button(u8"OFFLINE MEMBERS", imgui.ImVec2(tab_w, S(30))) then current_tab = 3 end
         if tab3_active then imgui.PopStyleColor() end
 
-        imgui.Spacing()
-        imgui.Separator()
+		imgui.Spacing()
+		imgui.Checkbox(u8"Не отображать строки в чате", hide_chat_lines)
         imgui.Spacing()
 
         if current_tab == 1 then
