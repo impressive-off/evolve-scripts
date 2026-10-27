@@ -187,7 +187,7 @@ local driving_school = {
     ["Какие документы должен иметь"] = "Водительское удостоверение и документы на ТС",
     ["выезде с прилегающей территории"] = "Уступить дорогу движущемуся транспорту",
     ["По какой стороне дороги"] = "По правой стороне",
-    ["Когда запрещено управлять"] = "со состоянии алкогольного и наркотического",
+    ["Когда запрещено управлять"] = "В состоянии алкогольного и наркотического",
     ["отношении организованных колонн"] = "Пересекать колонну или занимать в ней место"
 }
 
@@ -524,6 +524,16 @@ local function extractUsers(text)
     return list
 end
 
+local function extractCoords(text)
+    local clean = stripColors(text)
+    local s, e = clean:match('()Сектор%s+.-%.%s*GPS:%s*%-?%d+%.?%d*,%s*%-?%d+%.?%d*,%s*%-?%d+%.?%d*()')
+    if not s then
+        s, e = clean:match('()[Ss]ector%s+.-%.%s*GPS:%s*%-?%d+%.?%d*,%s*%-?%d+%.?%d*,%s*%-?%d+%.?%d*()')
+    end
+    if not s then return nil end
+    return clean:sub(s, e - 1)
+end
+
 local function getFirstIndex()
     local maxFirst = max(0, 100 - S.rows)
     local off = tonumber(cfg.main.scrollPos) or 0
@@ -734,6 +744,7 @@ local function openMenu(row, mx, my, text)
     local link = extractLink(text)
     local ips = extractIps(text)
     local users = extractUsers(text)
+	local coords = extractCoords(text)
 
     local items = {}
     if code then
@@ -741,6 +752,9 @@ local function openMenu(row, mx, my, text)
     end
     if link then
         items[#items + 1] = { label = 'Копировать ссылку', act = 'link', value = link }
+    end
+	if coords then
+        items[#items + 1] = { label = 'Скопировать координаты', act = 'coords', value = coords }
     end
     items[#items + 1] = { label = 'Копировать сообщение', act = 'msg' }
 
@@ -843,6 +857,8 @@ local function runAction(it, part)
     elseif it.act == 'link' then
         setClipboard(it.value)
     elseif it.act == 'ip' then
+        setClipboard(it.value)
+	elseif it.act == 'coords' then
         setClipboard(it.value)
     elseif it.act == 'user' then
         setClipboard(it.value)
