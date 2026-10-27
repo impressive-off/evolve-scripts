@@ -34,6 +34,8 @@ local iniData = inicfg.load({
         markersize = 100,
         acceptown = false,
         listmode = 1,
+        cooldown = true,
+        cooldowntime = 5,
         whitelist = "",
         blacklist = ""
     },
@@ -43,7 +45,8 @@ local iniData = inicfg.load({
         mkv = "mkv",
         mykv = "mykv",
         mark = "mark",
-        markdell = "markdell"
+        markdell = "markdell",
+        marklist = "marklist"
     }
 }, directIni)
 
@@ -52,12 +55,19 @@ iniData.commands.mapmarker = nil
 if iniData.commands.markmenu == nil or iniData.commands.markmenu == "markmenu" then
     iniData.commands.markmenu = "mapmarker"
 end
+if iniData.commands.marklist == nil then
+    iniData.commands.marklist = "marklist"
+end
 
 if iniData.main.screenmarker == nil then
     iniData.main.screenmarker = true
 end
+if iniData.main.cooldown == nil then
+    iniData.main.cooldown = true
+end
 
 iniData.main.markersize = math.floor(math.max(50, math.min(200, tonumber(iniData.main.markersize) or 100)))
+iniData.main.cooldowntime = math.floor(math.max(1, math.min(15, tonumber(iniData.main.cooldowntime) or 5)))
 
 inicfg.save(iniData, directIni)
 
@@ -114,6 +124,14 @@ local pendingCoords = nil
 local activeTarget = nil
 local cursorEnabled = false
 
+local coordHistory = {}
+local HISTORY_MAX = 30
+local dialogTarget = nil
+local DLG_ACCEPT = 7410
+local DLG_LIST = 7411
+
+local lastOffer = {}
+
 local SEKTOR_CP1251 = "\xD1\xE5\xEA\xF2\xEE\xF0"
 
 local WAYPOINT_ICON_SIZE = 256
@@ -144,6 +162,7 @@ local cmdDefs = {
     {key = "mykv",      default = "mykv",      usage = "",          desc = "Узнать квадрат, в котором вы сейчас находитесь",       fn = function(a) cmd_mykv(a) end},
     {key = "mark",      default = "mark",      usage = "",          desc = "Отправить квадрат, в котором вы сейчас находитесь",    fn = function(a) cmd_mark(a) end},
     {key = "markdell",  default = "markdell",  usage = "",          desc = "Удалить текущую метку/чекпоинт",                       fn = function(a) cmd_markdell(a) end},
+    {key = "marklist",  default = "marklist",  usage = "",          desc = "Список игроков, которые кидали координаты",            fn = function(a) cmd_marklist(a) end},
 }
 
 function cmdName(def)
@@ -220,6 +239,8 @@ local ui = {
     markersize = imgui.new.int(iniData.main.markersize),
     acceptown = imgui.new.bool(iniData.main.acceptown == true),
     waypointcopy = imgui.new.bool(iniData.main.waypointcopy),
+    cooldown = imgui.new.bool(iniData.main.cooldown == true),
+    cooldowntime = imgui.new.int(iniData.main.cooldowntime),
     inputWhite = imgui.new.char[32](),
     inputBlack = imgui.new.char[32](),
     cmdBuf = {},
@@ -444,7 +465,7 @@ local function drawList(title, list, buf, id)
     imgui.PushStyleColor(imgui.Col.Text, TEXT_DARK)
     local click = imgui.Button(u8"Добавить##" .. id, imgui.ImVec2(btnW, 0))
     imgui.PopStyleColor(4)
-	
+
     if enter or click then
         if addToList(list, ffi.string(buf)) then
             ffi.fill(buf, ffi.sizeof(buf))
@@ -527,9 +548,9 @@ local function drawCommandRow(def, last)
     advanceTo(x0, y0 + rh)
 end
 
-local sizeDirty = false
+local sliderDirty = {}
 
-local function drawSizeSlider()
+local function drawSlider(id, label, buf, minV, maxV, fmt, onLive)
     local dl = imgui.GetWindowDrawList()
     local x0 = imgui.GetCursorPosX()
     local y0 = imgui.GetCursorPosY()
@@ -539,7 +560,7 @@ local function drawSizeSlider()
 
     imgui.SetCursorPos(imgui.ImVec2(x0, y0 + sc(2)))
     imgui.PushStyleColor(imgui.Col.Text, TEXT_DIM)
-    imgui.Text(u8"Размер метки")
+    imgui.Text(u8(label))
     imgui.PopStyleColor()
 
     imgui.SetCursorPos(imgui.ImVec2(x0, y0 + sc(2) + lineH() + sc(6)))
@@ -549,15 +570,15 @@ local function drawSizeSlider()
     imgui.PushStyleColor(imgui.Col.FrameBg, PILL_BG)
     imgui.PushStyleColor(imgui.Col.FrameBgHovered, imgui.ImVec4(0.09, 0.09, 0.12, 1.00))
     imgui.PushStyleColor(imgui.Col.FrameBgActive, imgui.ImVec4(0.11, 0.11, 0.15, 1.00))
-    if imgui.SliderInt("##markersize", ui.markersize, 50, 200, "%d%%") then
-        iniData.main.markersize = ui.markersize[0]
-        sizeDirty = true
+    if imgui.SliderInt("##" .. id, buf, minV, maxV, fmt) then
+        onLive(buf[0])
+        sliderDirty[id] = true
     end
     imgui.PopStyleColor(5)
     imgui.PopItemWidth()
 
-    if sizeDirty and not imgui.IsItemActive() then
-        sizeDirty = false
+    if sliderDirty[id] and not imgui.IsItemActive() then
+        sliderDirty[id] = false
         saveCfg()
     end
 
@@ -698,10 +719,11 @@ imgui.OnFrame(function() return ui.window[0] end, function()
         imgui.SetCursorScreenPos(imgui.ImVec2(p1.x, ly + sc(16)))
         imgui.BeginChild("##content", imgui.ImVec2(0, 0), false)
 
-        local rows = 5
-        if ui.waypointmsg[0] then rows = 6 end
+        local rows = 6
+        if ui.waypointmsg[0] then rows = 7 end
         local extra = 0
-        if ui.screenmarker[0] then extra = sliderBlockH() end
+        if ui.screenmarker[0] then extra = extra + sliderBlockH() end
+        if ui.cooldown[0] then extra = extra + sliderBlockH() end
         beginCard("main", cardHeight(rows * rowH() + extra), "Основное")
         if settingRow("enabled", "Работа скрипта", "Полное включение или отключение работы скрипта", ui.enabled, false) then
             setEnabled(ui.enabled[0])
@@ -711,18 +733,29 @@ imgui.OnFrame(function() return ui.window[0] end, function()
             saveCfg()
         end
         if ui.screenmarker[0] then
-            drawSizeSlider()
+            drawSlider("markersize", "Размер метки", ui.markersize, 50, 200, "%d%%", function(v)
+                iniData.main.markersize = v
+            end)
         end
         if settingRow("acceptown", "Принимать координаты от себя", "Предлагать поставить метку и по вашим сообщениям", ui.acceptown, false) then
             iniData.main.acceptown = ui.acceptown[0]
             saveCfg()
+        end
+        if settingRow("cooldown", "Задержка предложений", "Игнорировать частые координаты от одного игрока", ui.cooldown, false) then
+            iniData.main.cooldown = ui.cooldown[0]
+            saveCfg()
+        end
+        if ui.cooldown[0] then
+            drawSlider("cooldowntime", "Задержка между предложениями от одного игрока", ui.cooldowntime, 1, 15, u8"%d сек", function(v)
+                iniData.main.cooldowntime = v
+            end)
         end
         if settingRow("clickmark", "Клик на колесико мыши", "Вызывает курсор для установки метки", ui.clickmark, false) then
             iniData.main.clickmark = ui.clickmark[0]
             saveCfg()
             if not ui.clickmark[0] then disableCursorMode() end
         end
-        if settingRow("wpmsg", "Сообщение о метке с карты", "Писать в чат квадрат метки, поставленной через ESC", ui.waypointmsg, not ui.waypointmsg[0]) then
+        if settingRow("wpmsg", "Сообщение о метке с карты", "Писать в чат сектор метки, поставленной через ESC", ui.waypointmsg, not ui.waypointmsg[0]) then
             iniData.main.waypointmsg = ui.waypointmsg[0]
             saveCfg()
         end
@@ -939,16 +972,18 @@ function main()
                 end
             end
 
+            processDialogs()
+
             if pendingCoords then
                 if os.clock() - pendingCoords.timestamp > 15.0 then
-                    sampAddChatMessage("{8A8383}[Map Marker]{FFFFFF} Время действия предложения (15 секунд) истекло.", -1)
+                    sampAddChatMessage("{8A8383}[Map Marker]{FFFFFF} Время действия предложения (15 секунд) истекло. /marklist", -1)
                     pendingCoords = nil
                 else
                     if not sampIsChatInputActive() and not sampIsDialogActive() and not isPauseMenuActive() then
                         if wasKeyPressed(vkeys.VK_Y) then
-                            setMarkers(pendingCoords.x, pendingCoords.y, pendingCoords.z, pendingCoords.sector)
-                            sampAddChatMessage(string.format("{8A8383}[Map Marker]{FFFFFF} Метка установлена на сектор: {8A8383}%s{FFFFFF}. {FFFFFF}GPS: {8A8383}%.1f, %.1f, %.1f", pendingCoords.sector, pendingCoords.x, pendingCoords.y, pendingCoords.z), -1)
+                            local nick = pendingCoords.nick
                             pendingCoords = nil
+                            showMarkList(nick)
                         elseif wasKeyPressed(vkeys.VK_N) then
                             sampAddChatMessage("{8A8383}[Map Marker]{FFFFFF} Предложение отменено.", -1)
                             pendingCoords = nil
@@ -992,7 +1027,7 @@ function main()
                     lastWaypoint = {x = wx, y = wy, z = wz}
                     if waypointInit and iniData.main.waypointmsg then
                         local wsector = getSectorFromCoords(wx, wy)
-                        sampAddChatMessage(string.format("{8A8383}[Map Marker]{FFFFFF} Метка установлена на карте. Квадрат: {8A8383}%s{FFFFFF}. {FFFFFF}GPS: {8A8383}%.1f, %.1f, %.1f", wsector, wx, wy, wz), -1)
+                        sampAddChatMessage(string.format("{8A8383}[Map Marker]{FFFFFF} Метка установлена на карте. Сектор: {8A8383}%s{FFFFFF}. {FFFFFF}GPS: {8A8383}%.1f, %.1f, %.1f", wsector, wx, wy, wz), -1)
                         if iniData.main.waypointcopy then
                             setClipboardTextUnicode(string.format(SEKTOR_CP1251 .. " %s. GPS: %.1f, %.1f, %.1f", wsector, wx, wy, wz))
                             sampAddChatMessage("{8A8383}[Map Marker]{FFFFFF} Координаты скопированы в буфер обмена.", -1)
@@ -1152,15 +1187,89 @@ function setMarkers(x, y, z, sector)
     currentCheckpoint = createCheckpoint(2, x, y, z + 1.5, x, y, z + 1.5, 2.0)
 end
 
-function triggerConfirmation(sector, x, y, z)
+function triggerConfirmation(sector, x, y, z, nick)
     pendingCoords = {
-        x = x,
-        y = y,
-        z = z,
+        x = x, y = y, z = z,
         sector = sector,
+        nick = nick or "Unknown",
         timestamp = os.clock()
     }
     sampAddChatMessage("{8A8383}[Map Marker]{FFFFFF} Вывести метку на карте {00FF00}Y{FFFFFF}. Отменить предложение {FF0000}N{FFFFFF}", -1)
+end
+
+function addToHistory(nick, sector, x, y, z)
+    for i = #coordHistory, 1, -1 do
+        if coordHistory[i].nick:lower() == nick:lower() then
+            table.remove(coordHistory, i)
+        end
+    end
+    table.insert(coordHistory, 1, {nick = nick, sector = sector, x = x, y = y, z = z})
+    while #coordHistory > HISTORY_MAX do
+        table.remove(coordHistory)
+    end
+end
+
+function processDialogs()
+    local ok2, btn2, list2 = sampHasDialogRespond(DLG_LIST)
+    if ok2 and btn2 == 1 then
+        local e = coordHistory[list2 + 1]
+        if e then
+            setMarkers(e.x, e.y, e.z, e.sector)
+            sampAddChatMessage(string.format("{8A8383}[Map Marker]{FFFFFF} Метка от {8A8383}%s{FFFFFF} установлена на сектор: {8A8383}%s{FFFFFF}. GPS: {8A8383}%.1f, %.1f, %.1f", e.nick, e.sector, e.x, e.y, e.z), -1)
+        end
+    end
+end
+
+function showMarkList(selectNick)
+    if #coordHistory == 0 then
+        sampAddChatMessage("{8A8383}[Map Marker]{FFFFFF} Список пуст, никто ещё не кидал координаты.", -1)
+        return
+    end
+
+    local lines = {}
+    local selIndex = 0
+    for i, e in ipairs(coordHistory) do
+        lines[#lines + 1] = string.format("%s\t%s\t%.1f, %.1f, %.1f", e.nick, e.sector, e.x, e.y, e.z)
+        if selectNick and e.nick:lower() == selectNick:lower() then
+            selIndex = i - 1
+        end
+    end
+
+    sampShowDialog(DLG_LIST, "{8A8383}Map Marker {FFFFFF}- последние координаты",
+        "Ник\tСектор\tGPS\n" .. table.concat(lines, "\n"), "Поставить", "Закрыть", 5)
+
+    if selIndex > 0 then
+        lua_thread.create(function()
+            wait(50)
+            sampSetCurrentDialogListItem(selIndex)
+        end)
+    end
+end
+
+function cmd_marklist()
+    if not iniData.main.enabled then return end
+    showMarkList(nil)
+end
+
+function processDialogs()
+    local ok, btn, list = sampHasDialogRespond(DLG_ACCEPT)
+    if ok then
+        if btn == 1 and dialogTarget then
+            local t = dialogTarget
+            setMarkers(t.x, t.y, t.z, t.sector)
+            sampAddChatMessage(string.format("{8A8383}[Map Marker]{FFFFFF} Метка от {8A8383}%s{FFFFFF} установлена на сектор: {8A8383}%s{FFFFFF}. GPS: {8A8383}%.1f, %.1f, %.1f", t.nick, t.sector, t.x, t.y, t.z), -1)
+        end
+        dialogTarget = nil
+    end
+
+    local ok2, btn2, list2 = sampHasDialogRespond(DLG_LIST)
+    if ok2 and btn2 == 1 then
+        local e = coordHistory[list2 + 1]
+        if e then
+            setMarkers(e.x, e.y, e.z, e.sector)
+            sampAddChatMessage(string.format("{8A8383}[Map Marker]{FFFFFF} Метка от {8A8383}%s{FFFFFF} установлена на сектор: {8A8383}%s", e.nick, e.sector), -1)
+        end
+    end
 end
 
 function getSectorFromCoords(x, y)
@@ -1270,7 +1379,9 @@ function se.onServerMessage(color, text)
     if not sectorPos then return end
 
     local sender = cleanText:match("\xCE\xF2\xEF\xF0\xE0\xE2\xE8\xF2\xE5\xEB\xFC:%s*([%w_%.%-]+)")
-    local before = (sender or cleanText:sub(1, sectorPos - 1)):lower()
+    local beforeRaw = sender or cleanText:sub(1, sectorPos - 1)
+    local before = beforeRaw:lower()
+    local nick = sender or beforeRaw:match("([%a][%w]*_[%w_]+)") or "Unknown"
 
     local res, myId = sampGetPlayerIdByCharHandle(PLAYER_PED)
     if res and not iniData.main.acceptown then
@@ -1294,6 +1405,8 @@ function se.onServerMessage(color, text)
     if sector and sX and sY and sZ then
         local x, y, z = tonumber(sX), tonumber(sY), tonumber(sZ)
         if x and y and z then
+            addToHistory(nick, sector, x, y, z)
+
             if pendingCoords and pendingCoords.x == x and pendingCoords.y == y and pendingCoords.z == z then
                 return
             end
@@ -1301,9 +1414,18 @@ function se.onServerMessage(color, text)
                 return
             end
 
+            local key = nick:lower()
+            if iniData.main.cooldown then
+                local last = lastOffer[key]
+                if last and os.clock() - last < iniData.main.cooldowntime then
+                    return
+                end
+            end
+            lastOffer[key] = os.clock()
+
             lua_thread.create(function()
                 wait(0)
-                triggerConfirmation(sector, x, y, z)
+                triggerConfirmation(sector, x, y, z, nick)
             end)
         end
     end
